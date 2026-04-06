@@ -2260,16 +2260,24 @@ function AudioPlayer({ text }: { text: string }) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const chunksRef = useRef<SpeechChunk[]>([]);
-  const chunkIndexRef = useRef(0);
-  const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const playingRef = useRef(false);
 
-  // Load voices — Chrome loads them async
+  const chunksRef = useRef<SpeechChunk[]>([]);
+  const idxRef = useRef(0);
+  const speakingRef = useRef(false);
+  const playingRef = useRef(false);
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+  const watchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastAdvanceRef = useRef<number>(0);
+  const utterRef = useRef<SpeechSynthesisUtterance | null>(null);
+
   useEffect(() => {
     const load = () => {
       const v = window.speechSynthesis.getVoices();
-      if (v.length) setVoices(v);
+      if (v.length) {
+        setVoices(v);
+        voicesRef.current = v;
+      }
     };
     load();
     window.speechSynthesis.addEventListener("voiceschanged", load);
@@ -2277,106 +2285,183 @@ function AudioPlayer({ text }: { text: string }) {
       window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
 
-  function speakChunk(index: number, currentVoices: SpeechSynthesisVoice[]) {
-    if (!playingRef.current || index >= chunksRef.current.length) {
-      if (index >= chunksRef.current.length) {
-        playingRef.current = false;
-        setPlaying(false);
-        setProgress(100);
-        stopKeepAlive();
-      }
-      return;
+  useEffect(
+    () => () => {
+      playingRef.current = false;
+      window.speechSynthesis.cancel();
+      if (watchdogRef.current) clearInterval(watchdogRef.current);
+      if (keepAliveRef.current) clearInterval(keepAliveRef.current);
+    },
+    [],
+  );
+
+  function clearTimers() {
+    if (watchdogRef.current) {
+      clearInterval(watchdogRef.current);
+      watchdogRef.current = null;
     }
-    const chunk = chunksRef.current[index];
-    const utter = new SpeechSynthesisUtterance(chunk.text);
-    const settings = getVoiceSettings(chunk.voiceType);
-    utter.rate = settings.rate;
-    utter.pitch = settings.pitch;
-    utter.volume = 1.0;
-
-    // Assign voice if available
-    const voice = pickVoice(currentVoices, chunk.voiceType);
-    if (voice) utter.voice = voice;
-
-    utter.onend = () => {
-      chunkIndexRef.current = index + 1;
-      setProgress(Math.round(((index + 1) / chunksRef.current.length) * 100));
-      speakChunk(index + 1, currentVoices);
-    };
-    utter.onerror = (e) => {
-      if (e.error !== "interrupted" && e.error !== "canceled") {
-        chunkIndexRef.current = index + 1;
-        speakChunk(index + 1, currentVoices);
-      }
-    };
-    window.speechSynthesis.speak(utter);
-  }
-
-  function startKeepAlive() {
-    keepAliveRef.current = setInterval(() => {
-      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
-      }
-    }, 10000);
-  }
-
-  function stopKeepAlive() {
     if (keepAliveRef.current) {
       clearInterval(keepAliveRef.current);
       keepAliveRef.current = null;
     }
   }
 
-  const play = () => {
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
-      playingRef.current = true;
-      setPlaying(true);
-      startKeepAlive();
+  function fireChunk(index: number) {
+    const chunks = chunksRef.current;
+    if (!playingRef.current || index >= chunks.length) {
+      if (index >= chunks.length) {
+        playingRef.current = false;
+        speakingRef.current = false;
+        setPlaying(false);
+        setProgress(100);
+        clearTimers();
+      }
       return;
     }
+
+    const chunk = chunks[index];
+    const utter = new SpeechSynthesisUtterance(chunk.text);
+    const settings = getVoiceSettings(chunk.voiceType);
+    utter.rate = settings.rate;
+    utter.pitch = settings.pitch;
+    utter.volume = 1.0;
+    const cv = voicesRef.current.length ? voicesRef.current : voices;
+    const voice = pickVoice(cv, chunk.voiceType);
+    if (voice) utter.voice = voice;
+
+    speakingRef.current = true;
+    lastAdvanceRef.current = Date.now();
+    utterRef.current = utter;
+
+    utter.onend = () => {
+      if (!playingRef.current) return;
+      idxRef.current = index + 1;
+      speakingRef.current = false;
+      lastAdvanceRef.current = Date.now();
+      setProgress(Math.round(((index + 1) / chunks.length) * 100));
+      // Small gap between chunks to prevent Chrome queue overflow
+      setTimeout(() => {
+        if (playingRef.current && !speakingRef.current) {
+          fireChunk(idxRef.current);
+        }
+      }, 80);
+    };
+
+    utter.onerror = (e) => {
+      // interrupted/canceled are expected when we cancel for watchdog recovery
+      if (e.error === "interrupted" || e.error === "canceled") {
+        speakingRef.current = false;
+        return;
+      }
+      // Any other error: skip chunk and continue
+      idxRef.current = index + 1;
+      speakingRef.current = false;
+      lastAdvanceRef.current = Date.now();
+      setTimeout(() => {
+        if (playingRef.current) fireChunk(idxRef.current);
+      }, 150);
+    };
+
+    window.speechSynthesis.speak(utter);
+  }
+
+  function startTimers() {
+    clearTimers();
+    lastAdvanceRef.current = Date.now();
+
+    // CHROME KEEP-ALIVE: Chrome kills speechSynthesis after ~15s of audio.
+    // The fix is to pause+resume every 10s to reset Chrome's internal timer.
+    keepAliveRef.current = setInterval(() => {
+      if (!playingRef.current) return;
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }
+    }, 10000);
+
+    // WATCHDOG: detect Chrome silent-stop (not speaking, not paused, but chunks remain)
+    watchdogRef.current = setInterval(() => {
+      if (!playingRef.current) return;
+
+      const now = Date.now();
+      const isSpeaking = window.speechSynthesis.speaking;
+      const isPaused = window.speechSynthesis.paused;
+      const hasMore = idxRef.current < chunksRef.current.length;
+      const stalledMs = now - lastAdvanceRef.current;
+
+      // Chrome silently stopped — rescue it
+      if (
+        !isSpeaking &&
+        !isPaused &&
+        !speakingRef.current &&
+        hasMore &&
+        stalledMs > 600
+      ) {
+        lastAdvanceRef.current = now;
+        window.speechSynthesis.cancel();
+        const resumeIdx = idxRef.current;
+        setTimeout(() => {
+          if (playingRef.current) {
+            speakingRef.current = false;
+            fireChunk(resumeIdx);
+          }
+        }, 200);
+        return;
+      }
+
+      // Stuck on same chunk > 12s — force restart that chunk
+      if (isSpeaking && !isPaused && speakingRef.current && stalledMs > 12000) {
+        const stuckIdx = idxRef.current;
+        lastAdvanceRef.current = now;
+        window.speechSynthesis.cancel();
+        setTimeout(() => {
+          if (playingRef.current) {
+            speakingRef.current = false;
+            fireChunk(stuckIdx);
+          }
+        }, 200);
+      }
+    }, 300);
+  }
+
+  const play = () => {
     window.speechSynthesis.cancel();
     chunksRef.current = parseTextIntoSpeechChunks(text);
-    chunkIndexRef.current = 0;
+    idxRef.current = 0;
+    speakingRef.current = false;
     setProgress(0);
     playingRef.current = true;
     setPlaying(true);
-    startKeepAlive();
-    const currentVoices = window.speechSynthesis.getVoices();
-    setTimeout(
-      () => speakChunk(0, currentVoices.length ? currentVoices : voices),
-      150,
-    );
+    const cv = window.speechSynthesis.getVoices();
+    voicesRef.current = cv.length ? cv : voices;
+    startTimers();
+    setTimeout(() => fireChunk(0), 150);
   };
 
   const pause = () => {
-    window.speechSynthesis.pause();
     playingRef.current = false;
+    speakingRef.current = false;
+    window.speechSynthesis.cancel();
     setPlaying(false);
-    stopKeepAlive();
+    clearTimers();
+  };
+
+  const resume = () => {
+    playingRef.current = true;
+    setPlaying(true);
+    startTimers();
+    setTimeout(() => fireChunk(idxRef.current), 150);
   };
 
   const stop = () => {
     playingRef.current = false;
+    speakingRef.current = false;
     window.speechSynthesis.cancel();
     setPlaying(false);
     setProgress(0);
-    chunkIndexRef.current = 0;
-    stopKeepAlive();
+    idxRef.current = 0;
+    clearTimers();
   };
-
-  useEffect(
-    () => () => {
-      playingRef.current = false;
-      window.speechSynthesis.cancel();
-      if (keepAliveRef.current) {
-        clearInterval(keepAliveRef.current);
-        keepAliveRef.current = null;
-      }
-    },
-    [],
-  );
 
   return (
     <div
@@ -2403,7 +2488,7 @@ function AudioPlayer({ text }: { text: string }) {
           {!playing ? (
             <button
               type="button"
-              onClick={play}
+              onClick={idxRef.current > 0 ? resume : play}
               className="font-sans text-xs px-4 py-1.5 rounded-full transition-all"
               style={{
                 background: "oklch(0.72 0.12 72 / 0.18)",
@@ -2412,7 +2497,7 @@ function AudioPlayer({ text }: { text: string }) {
               }}
               data-ocid="read.primary_button"
             >
-              ▶ Play
+              {idxRef.current > 0 ? "▶ Resume" : "▶ Play"}
             </button>
           ) : (
             <button
