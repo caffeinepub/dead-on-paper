@@ -2077,109 +2077,387 @@ function GoldDivider() {
   return <div className="gold-divider" />;
 }
 
+// Voice type enum for character differentiation
+type VoiceType = "narrator" | "male" | "female";
+
+interface SpeechChunk {
+  text: string;
+  voiceType: VoiceType;
+}
+
+// Male character names in the story
+const MALE_NAMES = [
+  "salvatore",
+  "damien",
+  "leonardo",
+  "lucien",
+  "luca",
+  "matteo",
+  "dixon",
+  "russo",
+  "bellini",
+  "marco",
+];
+// Female character names in the story
+const FEMALE_NAMES = ["vivienne", "isabella", "celeste", "celia"];
+
+function detectVoiceType(line: string): VoiceType {
+  const lower = line.toLowerCase();
+  // Check if line starts with a character attribution like `Name said` or `"..."` preceded by character name
+  // Look for dialogue markers: lines in quotes that follow a character name attribution
+  for (const name of MALE_NAMES) {
+    // Pattern: Name's words / Name said / Name whispered / Name [verb]
+    if (
+      new RegExp(
+        `\\b${name}['\'s]*\\s+(said|whispered|murmured|asked|replied|growled|snapped|hissed|barked|called|shouted|breathed|answered|continued|added)`,
+        "i",
+      ).test(lower)
+    ) {
+      return "male";
+    }
+    // Direct speech attribution at start of line: "Name:" or "Name —"
+    if (new RegExp(`^[""]?${name}[:\s—]`).test(lower)) {
+      return "male";
+    }
+  }
+  for (const name of FEMALE_NAMES) {
+    if (
+      new RegExp(
+        `\\b${name}['\'s]*\\s+(said|whispered|murmured|asked|replied|snapped|hissed|called|shouted|breathed|answered|continued|added|smiled|laughed)`,
+        "i",
+      ).test(lower)
+    ) {
+      return "female";
+    }
+    if (new RegExp(`^[""]?${name}[:\s—]`).test(lower)) {
+      return "female";
+    }
+  }
+  return "narrator";
+}
+
+function parseTextIntoSpeechChunks(raw: string): SpeechChunk[] {
+  // Split by sentence boundaries, keeping ~180 chars max per chunk
+  const sentences = raw.match(/[^.!?\n]+[.!?\n]+[\s]*/g) || [raw];
+  const chunks: SpeechChunk[] = [];
+  let current = "";
+  let currentType: VoiceType = "narrator";
+
+  const pushCurrent = () => {
+    if (current.trim()) {
+      chunks.push({ text: current.trim(), voiceType: currentType });
+    }
+    current = "";
+  };
+
+  for (const s of sentences) {
+    const detected = detectVoiceType(s);
+    if ((current + s).length > 200 || detected !== currentType) {
+      pushCurrent();
+      currentType = detected;
+      current = s;
+    } else {
+      if (!current) currentType = detected;
+      current += s;
+    }
+  }
+  pushCurrent();
+
+  return chunks.length > 0 ? chunks : [{ text: raw, voiceType: "narrator" }];
+}
+
+// Pick the best available voice for each role
+function pickVoice(
+  voices: SpeechSynthesisVoice[],
+  type: VoiceType,
+): SpeechSynthesisVoice | null {
+  if (!voices.length) return null;
+
+  if (type === "narrator") {
+    // Prefer rich, low female voices — US or UK English female
+    const preferred = [
+      "Google UK English Female",
+      "Samantha",
+      "Victoria",
+      "Karen",
+      "Moira",
+      "Fiona",
+      "Tessa",
+      "Google US English",
+    ];
+    for (const name of preferred) {
+      const v = voices.find((v) => v.name === name);
+      if (v) return v;
+    }
+    // Fallback: any female-named English voice
+    const femaleEn = voices.find(
+      (v) => /female|woman/i.test(v.name) && /en[-_]/i.test(v.lang),
+    );
+    if (femaleEn) return femaleEn;
+    // Last resort: any English voice
+    return voices.find((v) => /en[-_]/i.test(v.lang)) || voices[0];
+  }
+
+  if (type === "male") {
+    const preferred = [
+      "Google UK English Male",
+      "Daniel",
+      "Alex",
+      "Fred",
+      "Lee",
+      "Gordon",
+      "Ralph",
+    ];
+    for (const name of preferred) {
+      const v = voices.find((v) => v.name === name);
+      if (v) return v;
+    }
+    const maleEn = voices.find(
+      (v) => /male|man/i.test(v.name) && /en[-_]/i.test(v.lang),
+    );
+    if (maleEn) return maleEn;
+    return voices.find((v) => /en[-_]/i.test(v.lang)) || voices[0];
+  }
+
+  if (type === "female") {
+    const preferred = [
+      "Samantha",
+      "Victoria",
+      "Karen",
+      "Google UK English Female",
+      "Moira",
+      "Fiona",
+    ];
+    for (const name of preferred) {
+      const v = voices.find((v) => v.name === name);
+      if (v) return v;
+    }
+    const femaleEn = voices.find(
+      (v) => /female|woman/i.test(v.name) && /en[-_]/i.test(v.lang),
+    );
+    if (femaleEn) return femaleEn;
+    return voices.find((v) => /en[-_]/i.test(v.lang)) || voices[0];
+  }
+
+  return voices[0];
+}
+
+function getVoiceSettings(type: VoiceType): { rate: number; pitch: number } {
+  switch (type) {
+    case "narrator":
+      // Seductive: slow, low, smoky
+      return { rate: 0.88, pitch: 0.78 };
+    case "male":
+      // Deep, measured, authoritative
+      return { rate: 0.95, pitch: 0.72 };
+    case "female":
+      // Clear, controlled, slightly higher
+      return { rate: 0.92, pitch: 1.08 };
+  }
+}
+
 function AudioPlayer({ text }: { text: string }) {
   const [playing, setPlaying] = useState(false);
-  const utterRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const chunksRef = useRef<SpeechChunk[]>([]);
+  const chunkIndexRef = useRef(0);
+  const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playingRef = useRef(false);
+
+  // Load voices — Chrome loads them async
+  useEffect(() => {
+    const load = () => {
+      const v = window.speechSynthesis.getVoices();
+      if (v.length) setVoices(v);
+    };
+    load();
+    window.speechSynthesis.addEventListener("voiceschanged", load);
+    return () =>
+      window.speechSynthesis.removeEventListener("voiceschanged", load);
+  }, []);
+
+  function speakChunk(index: number, currentVoices: SpeechSynthesisVoice[]) {
+    if (!playingRef.current || index >= chunksRef.current.length) {
+      if (index >= chunksRef.current.length) {
+        playingRef.current = false;
+        setPlaying(false);
+        setProgress(100);
+        stopKeepAlive();
+      }
+      return;
+    }
+    const chunk = chunksRef.current[index];
+    const utter = new SpeechSynthesisUtterance(chunk.text);
+    const settings = getVoiceSettings(chunk.voiceType);
+    utter.rate = settings.rate;
+    utter.pitch = settings.pitch;
+    utter.volume = 1.0;
+
+    // Assign voice if available
+    const voice = pickVoice(currentVoices, chunk.voiceType);
+    if (voice) utter.voice = voice;
+
+    utter.onend = () => {
+      chunkIndexRef.current = index + 1;
+      setProgress(Math.round(((index + 1) / chunksRef.current.length) * 100));
+      speakChunk(index + 1, currentVoices);
+    };
+    utter.onerror = (e) => {
+      if (e.error !== "interrupted" && e.error !== "canceled") {
+        chunkIndexRef.current = index + 1;
+        speakChunk(index + 1, currentVoices);
+      }
+    };
+    window.speechSynthesis.speak(utter);
+  }
+
+  function startKeepAlive() {
+    keepAliveRef.current = setInterval(() => {
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }
+    }, 10000);
+  }
+
+  function stopKeepAlive() {
+    if (keepAliveRef.current) {
+      clearInterval(keepAliveRef.current);
+      keepAliveRef.current = null;
+    }
+  }
 
   const play = () => {
     if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
+      playingRef.current = true;
       setPlaying(true);
+      startKeepAlive();
       return;
     }
     window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 1.0;
-    utter.pitch = 1.0;
-    utter.volume = 1.0;
-    utter.onend = () => setPlaying(false);
-    utter.onpause = () => setPlaying(false);
-    utterRef.current = utter;
-    window.speechSynthesis.speak(utter);
+    chunksRef.current = parseTextIntoSpeechChunks(text);
+    chunkIndexRef.current = 0;
+    setProgress(0);
+    playingRef.current = true;
     setPlaying(true);
+    startKeepAlive();
+    const currentVoices = window.speechSynthesis.getVoices();
+    setTimeout(
+      () => speakChunk(0, currentVoices.length ? currentVoices : voices),
+      150,
+    );
   };
 
   const pause = () => {
     window.speechSynthesis.pause();
+    playingRef.current = false;
     setPlaying(false);
+    stopKeepAlive();
   };
 
   const stop = () => {
+    playingRef.current = false;
     window.speechSynthesis.cancel();
     setPlaying(false);
+    setProgress(0);
+    chunkIndexRef.current = 0;
+    stopKeepAlive();
   };
 
   useEffect(
     () => () => {
+      playingRef.current = false;
       window.speechSynthesis.cancel();
+      if (keepAliveRef.current) {
+        clearInterval(keepAliveRef.current);
+        keepAliveRef.current = null;
+      }
     },
     [],
   );
 
   return (
     <div
-      className="flex items-center gap-3 my-6 p-4 rounded-xl"
+      className="flex flex-col gap-2 my-6 p-4 rounded-xl"
       style={{
         background: "oklch(0.16 0.008 240)",
         border: "1px solid oklch(0.72 0.12 72 / 0.25)",
       }}
       data-ocid="read.panel"
     >
-      <Volume2
-        size={16}
-        style={{ color: "oklch(0.72 0.12 72)" }}
-        className="shrink-0"
-      />
-      <span
-        className="font-sans text-xs tracking-widest uppercase"
-        style={{ color: "oklch(0.72 0.12 72 / 0.8)" }}
-      >
-        Listen aloud — no headphones needed
-      </span>
-      <div className="flex items-center gap-2 ml-auto">
-        {!playing ? (
-          <button
-            type="button"
-            onClick={play}
-            className="font-sans text-xs px-4 py-1.5 rounded-full transition-all"
-            style={{
-              background: "oklch(0.72 0.12 72 / 0.18)",
-              color: "oklch(0.78 0.13 72)",
-              border: "1px solid oklch(0.72 0.12 72 / 0.4)",
-            }}
-            data-ocid="read.primary_button"
-          >
-            ▶ Play
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={pause}
-            className="font-sans text-xs px-4 py-1.5 rounded-full transition-all"
-            style={{
-              background: "oklch(0.72 0.12 72 / 0.18)",
-              color: "oklch(0.78 0.13 72)",
-              border: "1px solid oklch(0.72 0.12 72 / 0.4)",
-            }}
-            data-ocid="read.secondary_button"
-          >
-            ⏸ Pause
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={stop}
-          className="font-sans text-xs px-3 py-1.5 rounded-full transition-all"
-          style={{
-            background: "oklch(0.14 0.004 240)",
-            color: "oklch(0.55 0.008 240)",
-            border: "1px solid oklch(0.25 0.008 240)",
-          }}
-          data-ocid="read.cancel_button"
+      <div className="flex items-center gap-3">
+        <Volume2
+          size={16}
+          style={{ color: "oklch(0.72 0.12 72)" }}
+          className="shrink-0"
+        />
+        <span
+          className="font-sans text-xs tracking-widest uppercase"
+          style={{ color: "oklch(0.72 0.12 72 / 0.8)" }}
         >
-          ■ Stop
-        </button>
+          Narrated — seductive voices, characters voiced
+        </span>
+        <div className="flex items-center gap-2 ml-auto">
+          {!playing ? (
+            <button
+              type="button"
+              onClick={play}
+              className="font-sans text-xs px-4 py-1.5 rounded-full transition-all"
+              style={{
+                background: "oklch(0.72 0.12 72 / 0.18)",
+                color: "oklch(0.78 0.13 72)",
+                border: "1px solid oklch(0.72 0.12 72 / 0.4)",
+              }}
+              data-ocid="read.primary_button"
+            >
+              ▶ Play
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={pause}
+              className="font-sans text-xs px-4 py-1.5 rounded-full transition-all"
+              style={{
+                background: "oklch(0.72 0.12 72 / 0.18)",
+                color: "oklch(0.78 0.13 72)",
+                border: "1px solid oklch(0.72 0.12 72 / 0.4)",
+              }}
+              data-ocid="read.secondary_button"
+            >
+              ⏸ Pause
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={stop}
+            className="font-sans text-xs px-3 py-1.5 rounded-full transition-all"
+            style={{
+              background: "oklch(0.14 0.004 240)",
+              color: "oklch(0.55 0.008 240)",
+              border: "1px solid oklch(0.25 0.008 240)",
+            }}
+            data-ocid="read.cancel_button"
+          >
+            ■ Stop
+          </button>
+        </div>
       </div>
+      {(playing || progress > 0) && (
+        <div
+          className="w-full rounded-full overflow-hidden"
+          style={{ height: 3, background: "oklch(0.22 0.008 240)" }}
+        >
+          <div
+            className="h-full rounded-full transition-all duration-300"
+            style={{
+              width: `${progress}%`,
+              background: "oklch(0.72 0.12 72)",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
