@@ -1,0 +1,236 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "PlayfairDisplay";
+  src: url("/assets/fonts/PlayfairDisplay.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "PlayfairDisplay";
+  src: url("/assets/fonts/PlayfairDisplay.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DMSans";
+  src: url("/assets/fonts/DMSans.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+
+    /* Noir-luxury dark theme */
+    /* Background: near-black #0F1112 */
+    --background: 0.13 0.004 250;
+    /* Slightly lighter: #1A1C1E */
+    --foreground: 0.91 0.012 75;
+    /* Card bg: #1B1F21 */
+    --card: 0.16 0.006 250;
+    --card-foreground: 0.91 0.012 75;
+    /* Popover */
+    --popover: 0.17 0.006 250;
+    --popover-foreground: 0.91 0.012 75;
+    /* Gold primary: #C9A45A */
+    --primary: 0.72 0.12 72;
+    --primary-foreground: 0.13 0.004 250;
+    /* Secondary: dark fill */
+    --secondary: 0.2 0.006 250;
+    --secondary-foreground: 0.91 0.012 75;
+    /* Muted: #B9B0A3 */
+    --muted: 0.19 0.005 250;
+    --muted-foreground: 0.73 0.016 75;
+    /* Accent: gold */
+    --accent: 0.72 0.12 72;
+    --accent-foreground: 0.13 0.004 250;
+    /* Destructive */
+    --destructive: 0.577 0.245 27.325;
+    --destructive-foreground: 0.985 0 0;
+    /* Border: #2E3438 */
+    --border: 0.25 0.008 240;
+    --input: 0.22 0.007 240;
+    --ring: 0.72 0.12 72;
+
+    /* Gold accent custom tokens */
+    --gold: 0.72 0.12 72;
+    --gold-bright: 0.78 0.13 72;
+    --gold-dark: 0.62 0.1 72;
+    --gold-muted: 0.68 0.1 72;
+
+    /* Paper/warm off-white */
+    --paper: 0.91 0.012 75;
+    --paper-dim: 0.73 0.016 75;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background: linear-gradient(
+      180deg,
+      oklch(0.13 0.004 250) 0%,
+      oklch(0.155 0.005 250) 100%
+    );
+    min-height: 100vh;
+    font-family: "PlayfairDisplay", Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: oklch(var(--gold) / 0.3);
+    color: oklch(var(--paper));
+  }
+}
+
+/* Gold gradient button */
+.btn-gold {
+  background: linear-gradient(
+    135deg,
+    oklch(0.78 0.13 75) 0%,
+    oklch(0.64 0.11 68) 100%
+  );
+  color: oklch(0.14 0.005 250);
+  border: none;
+  font-family: "DMSans", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.btn-gold:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+/* Gold outline button */
+.btn-outline-gold {
+  background: transparent;
+  color: oklch(var(--gold));
+  border: 1.5px solid oklch(var(--gold-muted));
+  font-family: "DMSans", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: background 0.2s, color 0.2s, transform 0.2s;
+}
+
+.btn-outline-gold:hover {
+  background: oklch(var(--gold) / 0.1);
+  transform: translateY(-1px);
+}
+
+/* Cinzel heading */
+.font-cinzel {
+  font-family: "Cinzel", serif;
+}
+
+/* Prose styling for chapter reading */
+.chapter-prose {
+  font-family: "PlayfairDisplay", Georgia, serif;
+  font-size: 1.1rem;
+  line-height: 1.8;
+  color: oklch(var(--paper));
+}
+
+.chapter-prose p {
+  margin-bottom: 1.4em;
+}
+
+/* Diary entry styling */
+.diary-entry {
+  font-family: "PlayfairDisplay", Georgia, serif;
+  font-style: italic;
+  background: linear-gradient(
+    135deg,
+    oklch(0.18 0.015 75) 0%,
+    oklch(0.16 0.012 75) 100%
+  );
+  border-left: 3px solid oklch(var(--gold) / 0.6);
+  border-radius: 4px 12px 12px 4px;
+  padding: 2rem 2.5rem;
+  margin: 2.5rem 0;
+  position: relative;
+}
+
+.diary-entry::before {
+  content: "\1F4D4";
+  position: absolute;
+  top: -0.6rem;
+  left: 1.5rem;
+  font-size: 1.2rem;
+  font-style: normal;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: oklch(0.13 0.004 250);
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(var(--gold) / 0.4);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(var(--gold) / 0.6);
+}
+
+/* Gold divider */
+.gold-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    oklch(var(--gold) / 0.5),
+    transparent
+  );
+  margin: 2rem 0;
+}
+
+/* Nav link */
+.nav-link {
+  font-family: "DMSans", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: oklch(var(--paper-dim));
+  transition: color 0.2s;
+  text-decoration: none;
+}
+
+.nav-link:hover,
+.nav-link.active {
+  color: oklch(var(--gold));
+}
+
+/* Feature card */
+.feature-card {
+  background: oklch(0.16 0.006 250);
+  border: 1px solid oklch(var(--border));
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 20px oklch(0 0 0 / 0.4);
+}
