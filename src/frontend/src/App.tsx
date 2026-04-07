@@ -6,6 +6,7 @@ import {
   Download,
   FileText,
   Headphones,
+  Lock,
   Menu,
   Sparkles,
   Star,
@@ -4483,6 +4484,28 @@ function AuthorSection() {
 
 function DownloadsSection() {
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [passcodeError, setPasscodeError] = useState(false);
+
+  const PASSCODE = "1945";
+
+  const handleUnlock = () => {
+    if (passcodeInput === PASSCODE) {
+      setUnlocked(true);
+      setPasscodeError(false);
+      setPasscodeInput("");
+    } else {
+      setPasscodeError(true);
+      setPasscodeInput("");
+    }
+  };
+
+  const handleLock = () => {
+    setUnlocked(false);
+    setPasscodeInput("");
+    setPasscodeError(false);
+  };
 
   const handleDownload = (key: string, action: () => void) => {
     setDownloading(key);
@@ -4549,7 +4572,8 @@ function DownloadsSection() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7 }}
         >
-          <div className="text-center mb-14">
+          {/* Section header — always visible */}
+          <div className="text-center mb-14 relative">
             <p className="font-sans text-xs tracking-[0.3em] text-gold uppercase mb-3">
               Files
             </p>
@@ -4564,88 +4588,187 @@ function DownloadsSection() {
               Download the complete production files — ebook, narration script,
               and audiobook production notes.
             </p>
+            {/* Re-lock button — only shown when unlocked */}
+            {unlocked && (
+              <button
+                type="button"
+                onClick={handleLock}
+                title="Lock downloads"
+                className="absolute top-0 right-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-sans tracking-wider transition-opacity opacity-60 hover:opacity-100"
+                style={{
+                  border: "1px solid oklch(0.72 0.12 72 / 0.4)",
+                  color: "oklch(0.72 0.12 72)",
+                }}
+                data-ocid="downloads.toggle"
+              >
+                <Lock size={12} />
+                Lock
+              </button>
+            )}
           </div>
 
-          <div className="flex flex-col gap-6" data-ocid="downloads.list">
-            {downloads.map((dl, i) => (
-              <motion.div
-                key={dl.key}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.1, duration: 0.5 }}
-                className="feature-card"
-                data-ocid={`downloads.item.${i + 1}`}
+          {/* Passcode gate */}
+          {!unlocked ? (
+            <motion.div
+              key="locked"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.4 }}
+              className="flex flex-col items-center gap-6 py-12"
+              data-ocid="downloads.dialog"
+            >
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{
+                  background: "oklch(0.72 0.12 72 / 0.1)",
+                  border: "1px solid oklch(0.72 0.12 72 / 0.35)",
+                }}
               >
-                <div className="flex items-start gap-5">
-                  <div
-                    className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                    style={{
-                      background: "oklch(0.72 0.12 72 / 0.12)",
-                      border: "1px solid oklch(0.72 0.12 72 / 0.3)",
-                    }}
+                <Lock size={28} style={{ color: "oklch(0.78 0.13 72)" }} />
+              </div>
+
+              <p
+                className="font-playfair text-base text-center"
+                style={{ color: "oklch(0.78 0.08 75)" }}
+              >
+                Enter passcode to access files
+              </p>
+
+              <div className="flex flex-col items-center gap-3 w-full max-w-xs">
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={passcodeInput}
+                  onChange={(e) => {
+                    setPasscodeInput(e.target.value.replace(/\D/g, ""));
+                    setPasscodeError(false);
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+                  placeholder="••••"
+                  className="w-full text-center tracking-[0.5em] text-lg font-cinzel rounded-xl px-4 py-3 outline-none focus:ring-2"
+                  style={{
+                    background: "oklch(0.14 0.01 30 / 0.6)",
+                    border: `1px solid ${passcodeError ? "oklch(0.55 0.2 25)" : "oklch(0.72 0.12 72 / 0.35)"}`,
+                    color: "oklch(0.9 0.05 75)",
+                    caretColor: "oklch(0.78 0.13 72)",
+                  }}
+                  data-ocid="downloads.input"
+                  autoComplete="off"
+                />
+
+                {passcodeError && (
+                  <p
+                    className="font-sans text-xs tracking-wide"
+                    style={{ color: "oklch(0.6 0.18 25)" }}
+                    data-ocid="downloads.error_state"
                   >
-                    <span className="text-gold">{dl.icon}</span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h3
-                          className="font-cinzel text-base font-semibold tracking-wide mb-0.5"
-                          style={{ color: "oklch(0.85 0.013 75)" }}
-                        >
-                          {dl.title}
-                        </h3>
-                        <p
-                          className="font-sans text-xs tracking-wider uppercase"
-                          style={{ color: "oklch(0.72 0.12 72 / 0.8)" }}
-                        >
-                          {dl.subtitle}
-                        </p>
-                      </div>
-                      <span
-                        className="font-sans text-xs px-3 py-1 rounded-full shrink-0"
+                    Incorrect passcode
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleUnlock}
+                  disabled={passcodeInput.length !== 4}
+                  className="btn-outline-gold w-full px-6 py-2.5 rounded-full text-xs tracking-widest font-sans uppercase mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-ocid="downloads.submit_button"
+                >
+                  Unlock
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="unlocked"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.4 }}
+            >
+              <div className="flex flex-col gap-6" data-ocid="downloads.list">
+                {downloads.map((dl, i) => (
+                  <motion.div
+                    key={dl.key}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.1, duration: 0.5 }}
+                    className="feature-card"
+                    data-ocid={`downloads.item.${i + 1}`}
+                  >
+                    <div className="flex items-start gap-5">
+                      <div
+                        className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
                         style={{
-                          background: "oklch(0.72 0.12 72 / 0.1)",
-                          color: "oklch(0.72 0.12 72)",
+                          background: "oklch(0.72 0.12 72 / 0.12)",
                           border: "1px solid oklch(0.72 0.12 72 / 0.3)",
                         }}
                       >
-                        {dl.ext}
-                      </span>
-                    </div>
-                    <p className="font-playfair text-sm mt-3 mb-5 leading-relaxed text-paper-dim">
-                      {dl.desc}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => handleDownload(dl.key, dl.action)}
-                      disabled={downloading === dl.key}
-                      className="btn-outline-gold px-6 py-2.5 rounded-full text-xs flex items-center gap-2 disabled:opacity-50"
-                      data-ocid={`downloads.button.${i + 1}`}
-                    >
-                      {downloading === dl.key ? (
-                        <>
+                        <span className="text-gold">{dl.icon}</span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h3
+                              className="font-cinzel text-base font-semibold tracking-wide mb-0.5"
+                              style={{ color: "oklch(0.85 0.013 75)" }}
+                            >
+                              {dl.title}
+                            </h3>
+                            <p
+                              className="font-sans text-xs tracking-wider uppercase"
+                              style={{ color: "oklch(0.72 0.12 72 / 0.8)" }}
+                            >
+                              {dl.subtitle}
+                            </p>
+                          </div>
                           <span
-                            className="w-3.5 h-3.5 border-2 rounded-full animate-spin"
+                            className="font-sans text-xs px-3 py-1 rounded-full shrink-0"
                             style={{
-                              borderColor: "oklch(0.72 0.12 72 / 0.3)",
-                              borderTopColor: "oklch(0.72 0.12 72)",
+                              background: "oklch(0.72 0.12 72 / 0.1)",
+                              color: "oklch(0.72 0.12 72)",
+                              border: "1px solid oklch(0.72 0.12 72 / 0.3)",
                             }}
-                          />
-                          Preparing...
-                        </>
-                      ) : (
-                        <>
-                          <Download size={14} />
-                          DOWNLOAD {dl.ext.toUpperCase()}
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
+                          >
+                            {dl.ext}
+                          </span>
+                        </div>
+                        <p className="font-playfair text-sm mt-3 mb-5 leading-relaxed text-paper-dim">
+                          {dl.desc}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleDownload(dl.key, dl.action)}
+                          disabled={downloading === dl.key}
+                          className="btn-outline-gold px-6 py-2.5 rounded-full text-xs flex items-center gap-2 disabled:opacity-50"
+                          data-ocid={`downloads.button.${i + 1}`}
+                        >
+                          {downloading === dl.key ? (
+                            <>
+                              <span
+                                className="w-3.5 h-3.5 border-2 rounded-full animate-spin"
+                                style={{
+                                  borderColor: "oklch(0.72 0.12 72 / 0.3)",
+                                  borderTopColor: "oklch(0.72 0.12 72)",
+                                }}
+                              />
+                              Preparing...
+                            </>
+                          ) : (
+                            <>
+                              <Download size={14} />
+                              DOWNLOAD {dl.ext.toUpperCase()}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          )}
         </motion.div>
       </div>
     </section>
